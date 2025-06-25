@@ -1,0 +1,136 @@
+my sql queries
+1. SELECT 
+market FROM dim_customer
+where customer = 'Atliq Exclusive' and region = 'APAC'
+group by market
+order by market;
+
+2.SELECT
+ x.a as unique_product_2020, y.b as unique_product_2021,round((b-a)*100/a, 2) as percentage_chg
+ from
+(
+(select count(distinct(product_code)) as a from fact_sales_monthly
+where fiscal_year = '2020' ) x,
+(select count(distinct(product_code)) as b
+from fact_sales_monthly
+where fiscal_year = '2021') y 
+)
+
+3.SELECT 
+segment ,count(distinct product_code) as product_count FROM dim_product
+group by segment
+order by product_count desc
+
+4.with cte1 as
+
+ (
+ select p.segment as a, count(distinct fs.product_code) as b
+ FROM dim_Product p , fact_sales_monthly fs   
+ where p.product_code = fs.product_code
+ group by fiscal_year, p.segment
+ having fiscal_year ='2020' 
+ ),
+
+cte2 as
+ (
+ select p.segment as c, count(distinct fs.product_code) as d
+ FROM dim_Product p , fact_sales_monthly fs   
+ where p.product_code = fs.product_code
+ group by fiscal_year, p.segment
+ having fiscal_year ='2021' 
+ )
+ select cte1.a as segment, cte1.b as product_count_2020, cte2.d as product_count_2021, (cte2.d-cte1.b) as difference
+ from cte1, cte2
+ where cte1.a=cte2.c
+
+5.SELECT 
+f.product_code , p.product, f.manufacturing_cost
+FROM fact_manufacturing_cost f
+join dim_product p
+on f.product_code=p.product_code
+where manufacturing_cost
+in ( 
+select max(manufacturing_cost) from fact_manufacturing_cost
+union
+select min(manufacturing_cost) from fact_manufacturing_cost )
+order by manufacturing_cost desc
+
+6.SELECT 
+    c.customer_code,
+    c.customer,
+    round(avg(pre_invoice_discount_pct),4) AS average__discount_pct
+FROM fact_pre_invoice_deductions f
+        JOIN
+    dim_customer c ON f.customer_code = c.customer_code
+WHERE
+    market = 'india'
+        AND fiscal_year = '2021'
+GROUP BY c.customer_code,c.customer
+ORDER BY round(avg(pre_invoice_discount_pct),4) DESC
+LIMIT 5;
+
+7.SELECT 
+concat(monthname(fs.date), ' (', year(fs.date), ')') as 'month', fs.fiscal_year,
+round(sum(g.gross_price*fs.sold_quantity), 2) as gross_sales_amount
+FROM fact_sales_monthly fs
+join dim_customer c on fs.customer_code = c.customer_code
+join fact_gross_price g on fs.product_code = g.product_code
+where c.customer = 'Atliq Exclusive'
+group by  month, fs.fiscal_year
+order by fs.fiscal_year
+
+8.with temp_table as (
+select date,month(date_add(date,interval 4 month)) as period, fiscal_year, sold_quantity
+from fact_sales_monthly
+)
+SELECT 
+        CASE 
+            WHEN MONTH(date) IN (9, 10, 11) THEN 'Q1'
+            WHEN MONTH(date) IN (12, 1, 2) THEN 'Q2'
+            WHEN MONTH(date) IN (3, 4, 5) THEN 'Q3'
+            WHEN MONTH(date) IN (6, 7, 8) THEN 'Q4'
+        END AS fiscal_quarter,
+        round(sum(sold_quantity)/1000000,2) as total_sold_quantity_in_millions from temp_table
+        where fiscal_year = '2020'
+        group by fiscal_quarter
+        order by total_sold_quantity_in_millions desc ;
+        
+ 9.with temp_table as (
+SELECT 
+dc.channel,sum(fs.sold_quantity*fc.gross_price) as total_sales 
+ FROM fact_sales_monthly fs
+ join dim_customer dc
+ on fs.customer_code = dc.customer_code
+ join fact_gross_price fc
+ on fs.product_code = fc.product_code 
+ where fs.fiscal_year = '2021'
+ group by dc.channel
+ order by total_sales desc
+ )
+ select
+ channel,
+ round(total_sales/1000000,2)as gross_sales_in_millions,
+ round(total_sales/(sum(total_sales) over())*100,2) as percentage
+ from temp_table ;
+
+10.with cte1
+as
+(select
+dp.division,fs.product_code,product, sum(fs.sold_quantity) as total_sold_quantity
+from dim_product dp join fact_sales_monthly fs
+on dp.product_code = fs.product_code
+where fs.fiscal_year='2021'
+group by fs.product_code, division,dp.product
+),
+cte2 as
+(
+SELECT
+division, product_code, product, total_sold_quantity,
+ rank() over (partition by division order by total_sold_quantity desc) as 'rank_order'
+FROM 
+cte1
+)  
+select cte1.division,cte1.product_code, cte1.product, cte2.total_sold_quantity, cte2.rank_order
+from cte1 join cte2
+on cte1.product_code = cte2.product_code
+where cte2.rank_order in (1,2,3);
